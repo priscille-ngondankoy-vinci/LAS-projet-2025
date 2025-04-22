@@ -49,7 +49,7 @@ int readLimitedLine (char* s, int sz) {
 // Anciennement: lireLigne (cf. TP1)
 // Pour une vidéo sur cette fonction: http://youtu.be/Zuyhvnwmlao?hd=1
 
-char* readLine () {
+char* readLine (void) {
    char buf[BUF_LEN];
    char* s = NULL;
    bool fin = false;
@@ -112,7 +112,7 @@ void printColor (char* format, char* s, int color) {
 // DATE AND TIME
 //******************************************************//
 
-char* getTime () {
+char* getTime (void) {
   time_t t;
   time_t ret = time(&t);  
   checkNeg(ret, "ERROR getTime");
@@ -130,7 +130,7 @@ char* getTime () {
 // RANDOM INTEGER
 //******************************************************//
 
-static unsigned generateRandomSeed () {
+static unsigned generateRandomSeed (void) {
   unsigned seed;
   FILE* fd = fopen("/dev/urandom", "r");  // entropy file in Unix systems
   checkCond(fd == NULL, "ERROR fopen"); 
@@ -271,7 +271,7 @@ char **readFileToTable(int fd) {
 // FORK SYSCALL
 //***************************************************************************//
 
-pid_t sfork() {
+pid_t sfork(void) {
   int childId = fork();
   checkCond(childId == -1, "Fork failed");
   return childId;
@@ -538,7 +538,7 @@ void sem_delete(int sem_id) {
 // SOCKETS SYSCALLS
 //***************************************************************************//
 
-int ssocket(){
+int ssocket(void){
   int sockfd = socket(AF_INET, SOCK_STREAM, 0);
   checkNeg(sockfd,"socket client creation error");
   return sockfd;

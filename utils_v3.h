@@ -38,7 +38,7 @@ int readLimitedLine (char* s, int sz);
  *      NULL in case of error or EOF; the string has been dynamically allocated,
  *      so it must be freed
  */
-char* readLine ();
+char* readLine (void);
 
 
 //******************************************************//
@@ -70,7 +70,7 @@ void printColor (char* format, char* s, int color);
  * RES: a string representing system time and date
  *      (format: "Wed Jun 30 21:49:08 1993")
  */
-char* getTime ();
+char* getTime (void);
 
 
 //******************************************************//
@@ -185,7 +185,7 @@ char **readFileToTable(int fd);
 //***************************************************************************//
 
 // NOTE: This is a safe version of the "close" system call
-pid_t sfork();
+pid_t sfork(void);
 
 /** 
  * POST: A new child process is created by means of the "fork" function.
@@ -319,12 +319,15 @@ void sshmdelete(int shm_id);
 // This function has three or four arguments, depending on cmd.  
 // When there are four, the fourth has the type union semun.  
 // The  calling program must define this union as follows:
+#if !defined(__APPLE__) && !defined(_SEMUN_DEFINED)
+#define _SEMUN_DEFINED
 union semun {
    int              val;    /* Value for SETVAL */
    struct semid_ds *buf;    /* Buffer for IPC_STAT, IPC_SET */
-   unsigned short  *array;  /* Array for GETALL, SETALL */
-   struct seminfo  *__buf;  /* Buffer for IPC_INFO (Linux-specific) */
+   unsigned short *array;  /* Array for GETALL, SETALL */
+   struct seminfo *__buf;  /* Buffer for IPC_INFO (Linux-specific) */
 };
+#endif
 
 /** 
  * PRE:  key: semaphore identification key
@@ -381,7 +384,7 @@ void sem_delete(int sem_id);
  *       of type SOCK_STREAM. 
  *       Returns the file descriptor for the socket
  */
-int ssocket();
+int ssocket(void);
 
 /** 
  * PRE : serverIP   : the server IP address 
