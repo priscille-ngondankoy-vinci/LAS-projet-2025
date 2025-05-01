@@ -44,7 +44,9 @@ int main(int argc, char **argv){
 
   /* wait server response */
   sread(sockfd, &msg, sizeof(msg));
+  printf("Je suis le joueur numéro %u\n", msg.registration.player);
 
   sclose(sockfd);
   return 0;
 }
+

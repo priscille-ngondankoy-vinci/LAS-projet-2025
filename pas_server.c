@@ -7,10 +7,46 @@
 #include "utils_v3.h"
 #include "pascman.h"
 #include "game.h"
-#define PORT 9501
+#define SERVER_PORT 9501
 #define KEY 19753
 
+#define MAX_PLAYERS 2
+#define BACKLOG 5
 #define BUFFERSIZE 80
+
+typedef struct Player
+{
+    uint32_t player_id;
+    int sockfd;
+} Player;
+
+volatile sig_atomic_t end = 0;
+
+void endServerHandler(int sig)
+{
+  end = 1;
+}
+
+void terminate(Player *tabPlayers, int nbPlayers)
+{
+  printf("\nJoueurs inscrits : \n");
+  for (int i = 0; i < nbPlayers; i++)
+  {
+    printf("  - Joueur numéro : %u inscrit\n", tabPlayers[i].player_id);
+  }
+  exit(0);
+}
+
+int initSocketServer(int serverPort)
+{
+  int sockfd = ssocket();
+
+  sbind(serverPort, sockfd);
+
+  slisten(sockfd, BACKLOG);
+
+  return sockfd;
+}
 
 void run_broadcaster(void *argv)
 {
@@ -34,6 +70,23 @@ void run_broadcaster(void *argv)
 
 int main(int argc, char** argv) {
     
+    union Message msg;
+    Player tabPlayers[MAX_PLAYERS];
+    int nbPlayers = 0;
+
+    sigset_t set;
+    ssigemptyset(&set);
+    sigaddset(&set, SIGINT);
+    sigaddset(&set, SIGTERM);
+    ssigprocmask(SIG_BLOCK, &set, NULL);
+
+    ssigaction(SIGTERM, endServerHandler);
+    ssigaction(SIGINT, endServerHandler);
+
+    // Initialisation du serveur
+    int sockfd = initSocketServer(SERVER_PORT);
+    printf("Le serveur tourne sur le port : %i \n", SERVER_PORT);
+
     int shm = sshmget(KEY, sizeof(int), IPC_CREAT | 0666); // création de la mémoire partagée
     int sem_create = sem_create(KEY, 1, IPC_CREAT | 0666, 0); // création du sémaphore
     
@@ -52,14 +105,50 @@ int main(int argc, char** argv) {
     sclose(pipefd[0]); // fermeture du descripteur de lecture
     int nbChar;
     while ((nbChar = sread(0,))) // boucle de lecture des infos de la map pour les écrire au broadcaster à compléter
-
     
-    while (1) {
+
+    while (!end) {
+        
         pid_t client_handler = sfork();
 
-        
+        /* acceptation de la connexion */
+        int newsockfd = saccept(sockfd);
+        if (end)
+        {
+            terminate(tabPlayers, nbPlayers);
+        }
+
+        /* lecture de la connexion */
+        ssize_t ret = read(newsockfd, &msg, sizeof(msg));
+        if (end)
+        {
+            terminate(tabPlayers, nbPlayers);
+        }
+        checkCond(ret != sizeof(msg), "ERROR READ");
+
+        //donne un identifiant différent à chaque joueur
+        msg.registration.msgt = REGISTRATION;
+        msg.registration.player = nbPlayers;
+
+        /* note le socket du joueur à son indice*/
+        tabPlayers[nbPlayers].player_id = nbPlayers;
+        tabPlayers[nbPlayers].sockfd = newsockfd;
+        nbPlayers++;
+
+        printf("Inscription demandée par le joueur numéro: %u\n", msg.registration.player);
+        // Afficher les joueurs inscrits à chaque inscription
+        printf("Joueurs inscrits : \n");
+        for (int i = 0; i < nbPlayers; i++) {
+        printf("  - Joueur numéro : %u (ID du joueur: %d, Socket: %d)\n",
+            tabPlayers[i].player_id, tabPlayers[i].player_id, tabPlayers[i].sockfd);
+        }
+
+        nwrite(newsockfd, &msg, sizeof(msg));
+        printf("Nb Inscriptions : %i\n", nbPlayers);
+        printf("\n");
 
     }
+    sclose(sockfd);
 
     exit(0);
 }
