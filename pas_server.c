@@ -69,7 +69,7 @@ void run_broadcaster(void *argv)
 }
 
 int main(int argc, char** argv) {
-    +
+    
     union Message msg;
     Player tabPlayers[MAX_PLAYERS];
     int nbPlayers = 0;
@@ -104,36 +104,8 @@ int main(int argc, char** argv) {
     fork_and_run1(run_broadcaster, pipefd);
     sclose(pipefd[0]); // fermeture du descripteur de lecture
     int nbChar;
-    char buffer[BUFFERSIZE];
-    while (!end) {
-        snprintf(buffer, BUFFERSIZE,
-             "J1: score=%d pos=(%d,%d) | J2: score=%d pos=(%d,%d) | food_restante=%d | terminé=%s\n",
-             state.scores[0], state.positions[0].x, state.positions[0].y,
-             state.scores[1], state.positions[1].x, state.positions[1].y,
-             state.food_count,
-             state.game_over ? "oui" : "non");
-
-    swrite(pipefd[1], buffer, strlen(buffer));
-
-    usleep(500000); // 500 ms d'attente
-}
-// boucle de lecture des infos de la map pour les écrire au broadcaster à compléter
-    printf("Arrêt du serveur en cours...\n");
-
-// Fermer le descripteur d’écriture du pipe
-    sclose(pipefd[1]);
-
-// Détacher la mémoire partagée
-    sshmdt(shm);
-
-// Supprimer la mémoire partagée
-    shm_delete(KEY);
-
-// Supprimer le sémaphore
-    sem_delete(KEY);
-
-// Afficher les joueurs connectés avant de quitter
-    terminate(tabPlayers, nbPlayers);    
+    while ((nbChar = sread(0,))) // boucle de lecture des infos de la map pour les écrire au broadcaster à compléter
+    
 
     while (!end) {
         

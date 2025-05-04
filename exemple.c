@@ -39,11 +39,11 @@ int main(int argc, char** argv) {
         LEFT, LEFT, LEFT, LEFT,
         UP
     };
-    // Les deux joueurs font le même tour sur la carte. Le tour comprend
-    // 10 pas. Mais, le player 1 commence le tour à la e position définie
-    // tandis que le player 2 commence son tour à la toute premiere position.
-    // Ce petit décalage sert simplement à donner l'impression que le p2 
-    // poursuit le p1.
+    // Les deux joueurs font le même tour sur la carte. Le tour comprend  
+    // 10 pas. Mais, le player 1 commence le tour à la e position définie    
+    // tandis que le player 2 commence son tour à la toute premiere position. 
+    // Ce petit décalage sert simplement à donner l'impression que le p2   
+    // poursuit le p1.   
     int tour_len     = 10;
     int step_p1      = 4;
     int step_p2      = 0;
