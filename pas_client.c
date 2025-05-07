@@ -43,13 +43,12 @@ void run_pas_cman_ipl(void *arg_sockfd, void *arg_pipe_write) {
 int main(int argc, char **argv){
   char pseudo[MAX_PSEUDO];
   union Message msg;
+  int sockfd = initSocketClient(SERVER_IP, SERVER_PORT);
 
   // Création du pipe : écriture par pas-cman-ipl (stdout), lecture par pas-client
   int pipe[2];
   spipe(pipe);
 
-  int sockfd = initSocketClient(SERVER_IP, SERVER_PORT);
-  
   int psockfd = sockfd;
   int ppipe_write = pipefd[1];
 
@@ -69,16 +68,23 @@ int main(int argc, char **argv){
 
   // Envoi du message d'enregistrement au serveur
   msg.registration.msgt = REGISTRATION;
-  strncpy(msg.registration.pseudo, pseudo, MAX_PSEUDO);
   swrite(sockfd, &msg, sizeof(msg));
-
-  // Lecture de la réponse du serveur via le pipe
-  sread(pipe[0], &msg, sizeof(msg));
-
+  sread(sockfd, &msg, sizeof(msg));
   // Affichage du numéro de joueur
   printf("Je suis le joueur numéro %u\n", msg.registration.player);
 
-  // Nettoyage
+  while (1) {
+    uint8_t dir;
+    ssize_t ret = sread(pipe[0], &dir, sizeof(dir));
+    if (ret == 0) break;
+
+    // Construire un message Movement
+    msg.movement.msgt = MOVEMENT;
+    msg.movement.id = msg.registration.player; 
+
+    swrite(sockfd, &msg, sizeof(msg));
+}
+
   sclose(sockfd);
   close(pipe[0]);
 
