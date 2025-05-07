@@ -42,7 +42,7 @@ void client_handler_func(int player_id, int client_sockfd, struct GameState *sta
     ssigaction(SIGTERM, endServerHandler); // pour gérer la terminaison du serveur
     // tant que la partie est en cours
     while (!end && !state->game_over) {
-        ssize_t ret = nread(client_sockfd, &msg, sizeof(msg));
+        ssize_t ret = sread(client_sockfd, &msg, sizeof(msg));
         if (ret <= 0) {
             printf("Déconnexion ou erreur pour joueur %d\n", player_id);
             break;
@@ -53,14 +53,14 @@ void client_handler_func(int player_id, int client_sockfd, struct GameState *sta
         switch (msg.msgt) {
             case MOVEMENT:
                 printf("Joueur %d demande mouvement : dx=%d, dy=%d\n",
-                       player_id, msg.movement.dx, msg.movement.dy);
+                       player_id, msg.movement.pos.x, msg.movement.pos.y);
 
-                sem_down(sem_id); 
+                sem_down0(sem_id); 
                 // calculer la nouvelle position
                 // vérifier si le mouvement est valide
 
-                int new_x = state->positions[player_id].x + msg.movement.dx;
-                int new_y = state->positions[player_id].y + msg.movement.dy;
+                int new_x = state->positions[player_id].x + msg.movement.pos.x;
+                int new_y = state->positions[player_id].y + msg.movement.pos.y;
                 int index = new_y * LARGEUR_MAP + new_x;
 
                 if (state->map[index] != WALL) {
@@ -78,7 +78,7 @@ void client_handler_func(int player_id, int client_sockfd, struct GameState *sta
                     state->game_over = true;
                 }
 
-                sem_up(sem_id);
+                sem_up0(sem_id);
 
                 nwrite(client_sockfd, &msg, sizeof(msg));  // envoyer update
                 break;
