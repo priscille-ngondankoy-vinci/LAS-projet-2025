@@ -4,6 +4,7 @@
 #include <unistd.h>  // usleep
 #include <fcntl.h>
 #include <sys/wait.h> // pour waitpid
+#include <signal.h>
 
 #include "utils_v3.h"
 #include "pascman.h"
@@ -14,13 +15,23 @@
 
 #define MAX_PLAYERS 2
 #define BACKLOG 5
-#define BUFFERSIZE 256  // augmenté pour contenir plus de texte
+#define BUFFERSIZE 256
+
+// Ajout des définitions manquantes
+#define LARGEUR_MAP 20
+#define EMPTY 0
+#define WIN 1
+#define LOSE 2
+#define DRAW 3
 
 typedef struct Player {
     uint32_t player_id;
     int sockfd;
     pid_t child_pid;
 } Player;
+int initSocketServer(int serverPort);
+void run_broadcaster(void *argv);
+
 
 volatile sig_atomic_t end = 0;
 
@@ -36,29 +47,25 @@ void terminate(Player *tabPlayers, int nbPlayers) {
     exit(0);
 }
 
+
+
 void client_handler_func(int player_id, int client_sockfd, struct GameState *state, int sem_id) {
-   // handler du client
     union Message msg;
-    ssigaction(SIGTERM, endServerHandler); // pour gérer la terminaison du serveur
-    // tant que la partie est en cours
+    ssigaction(SIGTERM, endServerHandler);
+
     while (!end && !state->game_over) {
         ssize_t ret = sread(client_sockfd, &msg, sizeof(msg));
         if (ret <= 0) {
             printf("Déconnexion ou erreur pour joueur %d\n", player_id);
             break;
-        
-          }
-        
-        // traiter le message reçu 
+        }
+
         switch (msg.msgt) {
             case MOVEMENT:
                 printf("Joueur %d demande mouvement : dx=%d, dy=%d\n",
                        player_id, msg.movement.pos.x, msg.movement.pos.y);
 
-                sem_down0(sem_id); 
-                // calculer la nouvelle position
-                // vérifier si le mouvement est valide
-
+                sem_down(sem_id, 0);
                 int new_x = state->positions[player_id].x + msg.movement.pos.x;
                 int new_y = state->positions[player_id].y + msg.movement.pos.y;
                 int index = new_y * LARGEUR_MAP + new_x;
@@ -78,11 +85,9 @@ void client_handler_func(int player_id, int client_sockfd, struct GameState *sta
                     state->game_over = true;
                 }
 
-                sem_up0(sem_id);
-
-                nwrite(client_sockfd, &msg, sizeof(msg));  // envoyer update
+                sem_up(sem_id, 0);
+                nwrite(client_sockfd, &msg, sizeof(msg));
                 break;
-                  // inscription du joueur
 
             case REGISTRATION:
                 printf("Joueur %d s’enregistre\n", player_id);
@@ -93,7 +98,6 @@ void client_handler_func(int player_id, int client_sockfd, struct GameState *sta
                 break;
         }
     }
-    // fin de la partie ou déconnexion et affichage du résultat
 
     msg.msgt = GAME_OVER;
     if (state->scores[player_id] > state->scores[(player_id + 1) % 2]) {
@@ -193,12 +197,42 @@ int main(int argc, char **argv) {
 
     sclose(pipefd[1]);
     sshmdt(state);
-    shm_delete(KEY);
+    sshmdelete(KEY);
     sem_delete(KEY);
     sclose(sockfd);
 
     terminate(tabPlayers, nbPlayers);
     exit(0);
 }
+void run_broadcaster(void *argv)
+{
+   // PROCESSUS FILS
+   int *pipefd = argv;
+   char line[BUFFERSIZE + 1];
+
+   // Cloture du descripteur d'écriture
+   sclose(pipefd[1]);
+
+   // Boucle de lecture sur le pipe
+   // et écriture 
+   int nbChar;
+   while ((nbChar = sread(pipefd[0], line, BUFFERSIZE)) != 0) {
+      swrite(1, line, nbChar);
+   }
+
+   // Cloture du descripteur de lecture
+   sclose(pipefd[0]);
+}
+int initSocketServer(int serverPort)
+{
+  int sockfd = ssocket();
+
+  sbind(serverPort, sockfd);
+
+  slisten(sockfd, BACKLOG);
+
+  return sockfd;
+}
+
 
 
