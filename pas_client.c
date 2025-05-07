@@ -12,6 +12,7 @@
 #include "utils_v3.h"
 #include "pascman.h"
 #include "game.h"
+
 #define SERVER_PORT 9501
 #define SERVER_IP "127.0.0.1"
 #define KEY 19753
@@ -24,55 +25,62 @@ int initSocketClient(char * serverIP, int serverPort)
   return sockfd;
 }
 
+void run_pas_cman_ipl(void *arg_sockfd, void *arg_pipe_write) {
+  int sockfd = *(int *)arg_sockfd;
+  int pipe_write = *(int *)arg_pipe_write;
+
+  // Rediriger stdin vers la socket (pour que pas-cman-ipl lise les messages depuis le serveur)
+  sdup2(sockfd, 0);         
+  // Rediriger stdout vers le pipe (pour que pas-cman-ipl écrive ses messages dans le pipe)
+  sdup2(pipe_write, 1);  
+
+  close(sockfd);
+  close(pipe_write);
+
+  sexecl("./target/release/pas-cman-ipl", "pas-cman-ipl", NULL);
+}
+
 int main(int argc, char **argv){
   char pseudo[MAX_PSEUDO];
   union Message msg;
 
-  //création du pipe : écriture de pas-client et lecture de pas-cman-ipl
-  //création du pipe : écriture de pas-cman-ipl et lecture de pas-client
-  int pipe1[2], pipe2[2];
-  spipe(pipe1);
-  spipe(pipe2);
+  // Création du pipe : écriture par pas-cman-ipl (stdout), lecture par pas-client
+  int pipe[2];
+  spipe(pipe);
 
-  //processus fils pas-cman-ipl
-  pid_t pid = sfork();
-  if(pid == 0){
+  int sockfd = initSocketClient(SERVER_IP, SERVER_PORT);
+  
+  int psockfd = sockfd;
+  int ppipe_write = pipefd[1];
 
-    sdup2(pipe1[0], 0); // redirige l'entrée standard vers (une copie) du pipe de pas-client
-    sdup2(pipe2[1], 1); //redirige la sortie standard vers le pipe de pas-client
-    //ferme les descripteurs de pipe inutilisés puisque redirigés vers stdin et stdout
-    close(pipe1[0]); //fermé car en double
-    close(pipe1[1]); //inutilisé
-    close(pipe2[0]); //inutilisé
-    close(pipe2[1]); //fermé car en double
-    
-    //remplace le processus courant par pascman-ipl
-    sexecl("./target/release/pas-cman-ipl","pas-cman-ipl")
-  }
+  fork_and_run2(run_pas_cman_ipl, &psockfd, &ppipe_write);
 
-  close(pipe1[0]);
-  close(pipe2[1]);
+  close(pipe[1]); 
 
   /* retrieve player name */
-  printf("Bienvenue dans le programe d'inscription au serveur de jeu\n");
+  printf("Bienvenue dans le programme d'inscription au serveur de jeu\n");
   printf("Entrez votre pseudo :\n");
   int ret = sread(0, pseudo, MAX_PSEUDO);
   if (ret < 2) {
-        printf("Erreur: vous devez entrer un nom de joueur\n");
-        exit(1);
+    printf("Erreur: vous devez entrer un nom de joueur\n");
+    exit(1);
   }
   pseudo[ret - 1] = '\0';
-  msg.registration.msgt = REGISTRATION;
-  swrite(pipe1[1], &msg, sizeof(msg));
 
-  int sockfd = initSocketClient(SERVER_IP, SERVER_PORT);
+  // Envoi du message d'enregistrement au serveur
+  msg.registration.msgt = REGISTRATION;
+  strncpy(msg.registration.pseudo, pseudo, MAX_PSEUDO);
   swrite(sockfd, &msg, sizeof(msg));
 
-  /* wait server response */
-  sread(sockfd, &msg, sizeof(msg));
+  // Lecture de la réponse du serveur via le pipe
+  sread(pipe[0], &msg, sizeof(msg));
+
+  // Affichage du numéro de joueur
   printf("Je suis le joueur numéro %u\n", msg.registration.player);
 
+  // Nettoyage
   sclose(sockfd);
+  close(pipe[0]);
+
   return 0;
 }
-
