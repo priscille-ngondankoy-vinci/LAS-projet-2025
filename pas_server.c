@@ -55,6 +55,9 @@ void client_handler_func(int player_id, int client_sockfd, struct GameState *sta
     union Message msg;
     ssigaction(SIGTERM, endServerHandler);
 
+    // Enregistrer le joueur proprement
+    send_registered(player_id, client_sockfd);
+
     while (!end && !state->game_over) {
         ssize_t ret = sread(client_sockfd, &msg, sizeof(msg));
         if (ret <= 0) {
@@ -63,36 +66,30 @@ void client_handler_func(int player_id, int client_sockfd, struct GameState *sta
         }
 
         switch (msg.msgt) {
-            case MOVEMENT:
+            case MOVEMENT: {
                 printf("Joueur %d demande mouvement : dx=%d, dy=%d\n",
                        player_id, msg.movement.pos.x, msg.movement.pos.y);
 
+                enum Direction dir;
+                if (msg.movement.pos.x == 1) dir = RIGHT;
+                else if (msg.movement.pos.x == -1) dir = LEFT;
+                else if (msg.movement.pos.y == 1) dir = DOWN;
+                else if (msg.movement.pos.y == -1) dir = UP;
+                else continue; // ignore si direction invalide
+
                 sem_down(sem_id, 0);
-                int new_x = state->positions[player_id].x + msg.movement.pos.x;
-                int new_y = state->positions[player_id].y + msg.movement.pos.y;
-                int index = new_y * LARGEUR_MAP + new_x;
-
-                if (state->map[index] != WALL) {
-                    state->positions[player_id].x = new_x;
-                    state->positions[player_id].y = new_y;
-
-                    if (state->map[index] == FOOD || state->map[index] == SUPERFOOD) {
-                        state->scores[player_id] += (state->map[index] == FOOD) ? 10 : 50;
-                        state->map[index] = EMPTY;
-                        state->food_count--;
-                    }
-                }
-
-                if (state->food_count == 0) {
-                    state->game_over = true;
-                }
-
+                bool game_over = process_user_command(state, player_id == 0 ? PLAYER1 : PLAYER2, dir, client_sockfd);
                 sem_up(sem_id, 0);
-                nwrite(client_sockfd, &msg, sizeof(msg));
+
+                if (game_over) {
+                    end = 1; // marquer fin du jeu pour sortir de la boucle
+                }
+
                 break;
+            }
 
             case REGISTRATION:
-                printf("Joueur %d s’enregistre\n", player_id);
+                printf("Joueur %d s’est déjà enregistré.\n", player_id);
                 break;
 
             default:
@@ -101,11 +98,12 @@ void client_handler_func(int player_id, int client_sockfd, struct GameState *sta
         }
     }
 
+    // Préparer le message de fin de partie
     msg.msgt = GAME_OVER;
     if (state->scores[player_id] > state->scores[(player_id + 1) % 2]) {
         msg.game_over.winner = WIN;
     } else if (state->scores[player_id] < state->scores[(player_id + 1) % 2]) {
-        msg.game_over.winner  = LOSE;
+        msg.game_over.winner = LOSE;
     } else {
         msg.game_over.winner = DRAW;
     }
@@ -116,6 +114,7 @@ void client_handler_func(int player_id, int client_sockfd, struct GameState *sta
     sclose(client_sockfd);
     exit(0);
 }
+
 
 int main(int argc, char **argv) {
     union Message msg;
@@ -138,6 +137,7 @@ int main(int argc, char **argv) {
 
     int sem_id = sem_create(KEY, 1, IPC_CREAT | 0666, 0);
 
+    // Initialiser la map (diffusion sur pipefd[1] plus tard)
     FileDescriptor sout = 1;
     FileDescriptor map = sopen("./resources/map.txt", O_RDONLY, 0);
     load_map(map, sout, state);
@@ -146,7 +146,7 @@ int main(int argc, char **argv) {
     int pipefd[2];
     spipe(pipefd);
     fork_and_run1(run_broadcaster, pipefd);
-    sclose(pipefd[0]);
+    sclose(pipefd[0]);  // fermer lecture côté parent
 
     while (!end || (end && !state->game_over)) {
         char buffer[BUFFERSIZE];
@@ -163,19 +163,17 @@ int main(int argc, char **argv) {
             if (nbPlayers < MAX_PLAYERS) {
                 pid_t child_pid = sfork();
                 if (child_pid == 0) {
-                    client_handler_func(nbPlayers, newsockfd, state, sem_id);
+                    // Passer pipefd[1] comme "canal de diffusion" (pas juste le client)
+                    client_handler_func(nbPlayers, newsockfd, state, sem_id, pipefd[1]);
                     exit(0);
                 }
 
-                msg.registration.msgt = REGISTRATION;
-                msg.registration.player = nbPlayers;
                 tabPlayers[nbPlayers].player_id = nbPlayers;
                 tabPlayers[nbPlayers].sockfd = newsockfd;
                 tabPlayers[nbPlayers].child_pid = child_pid;
                 nbPlayers++;
 
-                printf("Inscription joueur numéro: %u\n", msg.registration.player);
-                nwrite(newsockfd, &msg, sizeof(msg));
+                printf("Inscription joueur numéro: %u\n", nbPlayers - 1);
             } else {
                 printf("Nombre maximum de joueurs atteint, refus de connexion.\n");
                 sclose(newsockfd);
@@ -206,6 +204,7 @@ int main(int argc, char **argv) {
     terminate(tabPlayers, nbPlayers);
     exit(0);
 }
+
 void run_broadcaster(void *argv)
 {
    // PROCESSUS FILS
