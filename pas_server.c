@@ -9,6 +9,8 @@
 #include "utils_v3.h"
 #include "pascman.h"
 #include "game.h"
+#include <stdint.h>
+
 
 #define SERVER_PORT 9090
 #define KEY 19753
@@ -101,11 +103,11 @@ void client_handler_func(int player_id, int client_sockfd, struct GameState *sta
 
     msg.msgt = GAME_OVER;
     if (state->scores[player_id] > state->scores[(player_id + 1) % 2]) {
-        msg.game_over.result = WIN;
+        msg.game_over.winner = WIN;
     } else if (state->scores[player_id] < state->scores[(player_id + 1) % 2]) {
-        msg.game_over.result = LOSE;
+        msg.game_over.winner  = LOSE;
     } else {
-        msg.game_over.result = DRAW;
+        msg.game_over.winner = DRAW;
     }
 
     nwrite(client_sockfd, &msg, sizeof(msg));
