@@ -13,7 +13,7 @@
 #include "pascman.h"
 #include "game.h"
 
-#define SERVER_PORT 9501
+#define SERVER_PORT 9090
 #define SERVER_IP "127.0.0.1"
 #define KEY 19753
 #define MAX_PSEUDO 256
@@ -50,7 +50,7 @@ int main(int argc, char **argv){
   spipe(pipe);
 
   int psockfd = sockfd;
-  int ppipe_write = pipefd[1];
+  int ppipe_write = pipe[1];
 
   fork_and_run2(run_pas_cman_ipl, &psockfd, &ppipe_write);
 
