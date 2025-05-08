@@ -5,6 +5,8 @@
 #include <fcntl.h>
 #include <sys/wait.h> // pour waitpid
 #include <signal.h>
+#include <sys/types.h>
+#include <sys/socket.h>
 
 #include "utils_v3.h"
 #include "pascman.h"
@@ -33,7 +35,7 @@ typedef struct Player {
 } Player;
 int initSocketServer(int serverPort);
 void run_broadcaster(void *argv);
-
+void client_handler_func(int player_id, int client_sockfd, struct GameState *state, int sem_id);
 
 volatile sig_atomic_t end = 0;
 
@@ -58,6 +60,15 @@ void client_handler_func(int player_id, int client_sockfd, struct GameState *sta
     // Enregistrer le joueur proprement
     send_registered(player_id, client_sockfd);
 
+    // Charger la map pour ce client
+    FileDescriptor map = sopen("./resources/map.txt", O_RDONLY, 0);
+    if (map < 0) {
+        perror("Erreur ouverture map.txt");
+        exit(EXIT_FAILURE);
+    }
+    load_map(map, client_sockfd, state);
+    sclose(map);
+
     while (!end && !state->game_over) {
         ssize_t ret = sread(client_sockfd, &msg, sizeof(msg));
         if (ret <= 0) {
@@ -75,21 +86,18 @@ void client_handler_func(int player_id, int client_sockfd, struct GameState *sta
                 else if (msg.movement.pos.x == -1) dir = LEFT;
                 else if (msg.movement.pos.y == 1) dir = DOWN;
                 else if (msg.movement.pos.y == -1) dir = UP;
-                else continue; // ignore si direction invalide
+                else continue; // ignorer si direction invalide
 
                 sem_down(sem_id, 0);
-                bool game_over = process_user_command(state, player_id == 0 ? PLAYER1 : PLAYER2, dir, client_sockfd);
+                process_user_command(state, player_id == 0 ? PLAYER1 : PLAYER2, dir, client_sockfd);
                 sem_up(sem_id, 0);
-
-                if (game_over) {
-                    end = 1; // marquer fin du jeu pour sortir de la boucle
-                }
 
                 break;
             }
 
             case REGISTRATION:
                 printf("Joueur %d s’est déjà enregistré.\n", player_id);
+                send_registered(player_id, client_sockfd);
                 break;
 
             default:
@@ -98,7 +106,7 @@ void client_handler_func(int player_id, int client_sockfd, struct GameState *sta
         }
     }
 
-    // Préparer le message de fin de partie
+    // Préparer et envoyer le message de fin de partie
     msg.msgt = GAME_OVER;
     if (state->scores[player_id] > state->scores[(player_id + 1) % 2]) {
         msg.game_over.winner = WIN;
@@ -130,6 +138,9 @@ int main(int argc, char **argv) {
     ssigaction(SIGINT, endServerHandler);
 
     int sockfd = initSocketServer(SERVER_PORT);
+    int opt = 1;
+    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
     printf("Le serveur tourne sur le port : %i \n", SERVER_PORT);
 
     int shm = sshmget(KEY, sizeof(struct GameState), IPC_CREAT | 0666);
@@ -137,34 +148,13 @@ int main(int argc, char **argv) {
 
     int sem_id = sem_create(KEY, 1, IPC_CREAT | 0666, 0);
 
-    // Initialiser la map (diffusion sur pipefd[1] plus tard)
-    FileDescriptor sout = 1;
-    FileDescriptor map = sopen("./resources/map.txt", O_RDONLY, 0);
-    load_map(map, sout, state);
-    sclose(map);
-
-    int pipefd[2];
-    spipe(pipefd);
-    fork_and_run1(run_broadcaster, pipefd);
-    sclose(pipefd[0]);  // fermer lecture côté parent
-
     while (!end || (end && !state->game_over)) {
-        char buffer[BUFFERSIZE];
-        snprintf(buffer, BUFFERSIZE,
-                 "J1: score=%d pos=(%d,%d) | J2: score=%d pos=(%d,%d) | food_restante=%d | terminé=%s\n",
-                 state->scores[0], state->positions[0].x, state->positions[0].y,
-                 state->scores[1], state->positions[1].x, state->positions[1].y,
-                 state->food_count,
-                 state->game_over ? "oui" : "non");
-        swrite(pipefd[1], buffer, strlen(buffer));
-
         int newsockfd = saccept(sockfd);
         if (newsockfd >= 0) {
             if (nbPlayers < MAX_PLAYERS) {
                 pid_t child_pid = sfork();
                 if (child_pid == 0) {
-                    // Passer pipefd[1] comme "canal de diffusion" (pas juste le client)
-                    client_handler_func(nbPlayers, newsockfd, state, sem_id, pipefd[1]);
+                    client_handler_func(nbPlayers, newsockfd, state, sem_id);
                     exit(0);
                 }
 
@@ -180,9 +170,7 @@ int main(int argc, char **argv) {
             }
         }
 
-        while (waitpid(-1, NULL, WNOHANG) > 0) {
-            // nettoyer les processus zombies
-        }
+        while (waitpid(-1, NULL, WNOHANG) > 0) {}
 
         usleep(500000);
     }
@@ -195,7 +183,6 @@ int main(int argc, char **argv) {
         sclose(tabPlayers[i].sockfd);
     }
 
-    sclose(pipefd[1]);
     sshmdt(state);
     sshmdelete(KEY);
     sem_delete(KEY);
@@ -204,6 +191,7 @@ int main(int argc, char **argv) {
     terminate(tabPlayers, nbPlayers);
     exit(0);
 }
+
 
 void run_broadcaster(void *argv)
 {
@@ -227,6 +215,8 @@ void run_broadcaster(void *argv)
 int initSocketServer(int serverPort)
 {
   int sockfd = ssocket();
+  int opt = 1;
+  setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
   sbind(serverPort, sockfd);
 

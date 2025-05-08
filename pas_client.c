@@ -17,6 +17,25 @@
 #define SERVER_IP "127.0.0.1"
 #define KEY 19753
 #define MAX_PSEUDO 256
+#include <termios.h>
+#include <unistd.h>
+
+// Active le mode raw (pas de buffer, pas d’echo)
+void enable_raw_mode() {
+    struct termios term;
+    tcgetattr(STDIN_FILENO, &term);
+    term.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &term);
+}
+
+// Remet le terminal en mode normal
+void disable_raw_mode() {
+    struct termios term;
+    tcgetattr(STDIN_FILENO, &term);
+    term.c_lflag |= (ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &term);
+}
+
 
 int initSocketClient(char * serverIP, int serverPort)
 {
@@ -41,6 +60,7 @@ void run_pas_cman_ipl(void *arg_sockfd, void *arg_pipe_write) {
 }
 
 int main(int argc, char **argv){
+  uint32_t player_id;
   char pseudo[MAX_PSEUDO];
   union Message msg;
   int sockfd = initSocketClient(SERVER_IP, SERVER_PORT);
@@ -70,6 +90,7 @@ int main(int argc, char **argv){
   msg.registration.msgt = REGISTRATION;
   swrite(sockfd, &msg, sizeof(msg));
   sread(sockfd, &msg, sizeof(msg));
+  player_id = msg.registration.player;
   // Affichage du numéro de joueur
   printf("Je suis le joueur numéro %u\n", msg.registration.player);
 
@@ -83,7 +104,43 @@ int main(int argc, char **argv){
     msg.movement.id = msg.registration.player; 
 
     swrite(sockfd, &msg, sizeof(msg));
+  }
+  enable_raw_mode();
+
+  while (1) {
+      char c;
+      if (read(STDIN_FILENO, &c, 1) < 1) continue;
+
+      enum Direction dir = -1;
+      if (c == 'z') dir = UP;
+      else if (c == 's') dir = DOWN;
+      else if (c == 'q') dir = LEFT;
+      else if (c == 'd') dir = RIGHT;
+      else continue;  // ignore touches inconnues
+
+      msg.movement.msgt = MOVEMENT;
+      msg.movement.id = player_id;
+
+      if (dir == LEFT) {
+          msg.movement.pos.x = -1;
+          msg.movement.pos.y = 0;
+} else if (dir == RIGHT) {
+          msg.movement.pos.x = 1;
+          msg.movement.pos.y = 0;
+} else if (dir == UP) {
+          msg.movement.pos.x = 0;
+          msg.movement.pos.y = -1;
+} else if (dir == DOWN) {
+          msg.movement.pos.x = 0;
+          msg.movement.pos.y = 1;
 }
+
+          swrite(sockfd, &msg, sizeof(msg));
+
+ }
+
+      disable_raw_mode();
+
 
   sclose(sockfd);
   close(pipe[0]);
