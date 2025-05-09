@@ -62,7 +62,7 @@ void run_client_handler(int client_fd, int player_id, struct GameState *state, i
             sem_down0(sem_id);
             bool game_over = process_user_command(state,
                 player_id == 1 ? PLAYER1 : PLAYER2,
-                (enum Direction) msg.movement.pos.x,// ⚠️ Remplacer par une vraie direction plus tard
+                (enum Direction) msg.movement.pos.x,// Remplacer par une vraie direction plus tard
                 pipe_bcast_write_fd);
             sem_up0(sem_id);
             if (game_over) break;
@@ -112,8 +112,8 @@ int main(int argc, char **argv) {
             child_pids[0] = -1;
             player_count = 1;
             alarm(30);
+            printf(" Joueur %d connecté avec succès.\n", player_count );
             continue;
-            printf("✅ Joueur %d connecté avec succès.\n", player_count + 1);
         }
 
         if (player_count == 1) {
@@ -138,7 +138,7 @@ int main(int argc, char **argv) {
             send_registered(2, client_fd);
             client_sockets[1] = client_fd;
 
-            printf("✅ Joueur %d connecté avec succès.\n", player_count + 1);
+            printf(" Joueur %d connecté avec succès.\n", player_count + 1);
 
             pid_t pid1 = sfork();
             if (pid1 == 0) {

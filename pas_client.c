@@ -20,23 +20,6 @@
 #include <termios.h>
 #include <unistd.h>
 
-// Active le mode raw (pas de buffer, pas d’echo)
-void enable_raw_mode(void) {
-    struct termios term;
-    tcgetattr(STDIN_FILENO, &term);
-    term.c_lflag &= ~(ICANON | ECHO);
-    tcsetattr(STDIN_FILENO, TCSANOW, &term);
-}
-
-// Remet le terminal en mode normal
-void disable_raw_mode(void) {
-    struct termios term;
-    tcgetattr(STDIN_FILENO, &term);
-    term.c_lflag |= (ICANON | ECHO);
-    tcsetattr(STDIN_FILENO, TCSANOW, &term);
-}
-
-
 int initSocketClient(char * serverIP, int serverPort)
 {
   int sockfd = ssocket();
@@ -92,7 +75,6 @@ int main(int argc, char **argv){
   sread(sockfd, &msg, sizeof(msg));
   player_id = msg.registration.player;
   // Affichage du numéro de joueur
-  printf("Je suis le joueur numéro %u\n", msg.registration.player);
 
  while (1) {
     enum Direction dir;
@@ -106,16 +88,11 @@ int main(int argc, char **argv){
 
     // La position n’est pas une position relative ici : on envoie uniquement la direction
     // Elle sera interprétée côté serveur
-    msg.movement.pos.x = dir; // ⚠️ Utilisé juste comme transport du code direction
+    msg.movement.pos.x = dir; // Utilisé juste comme transport du code direction
     msg.movement.pos.y = 0;
 
     swrite(sockfd, &msg, sizeof(msg));
 }
-
-
-
-  disable_raw_mode();
-
 
   sclose(sockfd);
   close(pipe[0]);
