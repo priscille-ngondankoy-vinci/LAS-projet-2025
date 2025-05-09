@@ -21,7 +21,7 @@
 #include <unistd.h>
 
 // Active le mode raw (pas de buffer, pas d’echo)
-void enable_raw_mode() {
+void enable_raw_mode(void) {
     struct termios term;
     tcgetattr(STDIN_FILENO, &term);
     term.c_lflag &= ~(ICANON | ECHO);
@@ -29,7 +29,7 @@ void enable_raw_mode() {
 }
 
 // Remet le terminal en mode normal
-void disable_raw_mode() {
+void disable_raw_mode(void) {
     struct termios term;
     tcgetattr(STDIN_FILENO, &term);
     term.c_lflag |= (ICANON | ECHO);
