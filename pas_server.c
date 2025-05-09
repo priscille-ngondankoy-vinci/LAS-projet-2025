@@ -1,229 +1,171 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>  // memset
-#include <unistd.h>  // usleep
-#include <fcntl.h>
-#include <sys/wait.h> // pour waitpid
-#include <signal.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-
 #include "utils_v3.h"
 #include "pascman.h"
 #include "game.h"
-#include <stdint.h>
-
-
-#define SERVER_PORT 9090
-#define KEY 19753
 
 #define MAX_PLAYERS 2
-#define BACKLOG 5
-#define BUFFERSIZE 256
+#define SHM_KEY 1234
+#define SEM_KEY 5678
 
-// Ajout des définitions manquantes
-#define LARGEUR_MAP 20
-#define EMPTY 0
-#define WIN 1
-#define LOSE 2
-#define DRAW 3
+volatile sig_atomic_t server_running = 1;
+volatile sig_atomic_t timeout_occurred = 0;
 
-typedef struct Player {
-    uint32_t player_id;
-    int sockfd;
-    pid_t child_pid;
-} Player;
-int initSocketServer(int serverPort);
-void run_broadcaster(void *argv);
-void client_handler_func(int player_id, int client_sockfd, struct GameState *state, int sem_id);
-
-volatile sig_atomic_t end = 0;
-
-void endServerHandler(int sig) {
-    end = 1;
+void handle_sigint(int sig) {
+    server_running = 0;
 }
 
-void terminate(Player *tabPlayers, int nbPlayers) {
-    printf("\nJoueurs inscrits : \n");
-    for (int i = 0; i < nbPlayers; i++) {
-        printf("  - Joueur numéro : %u inscrit\n", tabPlayers[i].player_id);
-    }
-    exit(0);
+void handle_sigalrm(int sig) {
+    timeout_occurred = 1;
 }
 
+int initSocketServer(int port) {
+    int sockfd = ssocket();
+    sbind(port, sockfd);
+    slisten(sockfd, 5);
+    int option = 1;
+    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option));
+    return sockfd;
+}
 
-
-void client_handler_func(int player_id, int client_sockfd, struct GameState *state, int sem_id) {
+void run_broadcaster(int read_fd, int socket1, int socket2, int player_count) {
     union Message msg;
-    ssigaction(SIGTERM, endServerHandler);
+    int sockets[MAX_PLAYERS] = { socket1, socket2 };
 
-    // Enregistrer le joueur proprement
-    send_registered(player_id, client_sockfd);
-
-    // Charger la map pour ce client
-    FileDescriptor map = sopen("./resources/map.txt", O_RDONLY, 0);
-    if (map < 0) {
-        perror("Erreur ouverture map.txt");
-        exit(EXIT_FAILURE);
-    }
-    load_map(map, client_sockfd, state);
-    sclose(map);
-
-    while (!end && !state->game_over) {
-        ssize_t ret = sread(client_sockfd, &msg, sizeof(msg));
-        if (ret <= 0) {
-            printf("Déconnexion ou erreur pour joueur %d\n", player_id);
-            break;
-        }
-
-        switch (msg.msgt) {
-            case MOVEMENT: {
-                printf("Joueur %d demande mouvement : dx=%d, dy=%d\n",
-                       player_id, msg.movement.pos.x, msg.movement.pos.y);
-
-                enum Direction dir;
-                if (msg.movement.pos.x == 1) dir = RIGHT;
-                else if (msg.movement.pos.x == -1) dir = LEFT;
-                else if (msg.movement.pos.y == 1) dir = DOWN;
-                else if (msg.movement.pos.y == -1) dir = UP;
-                else continue; // ignorer si direction invalide
-
-                sem_down(sem_id, 0);
-                process_user_command(state, player_id == 0 ? PLAYER1 : PLAYER2, dir, client_sockfd);
-                sem_up(sem_id, 0);
-
-                break;
-            }
-
-            case REGISTRATION:
-                printf("Joueur %d s’est déjà enregistré.\n", player_id);
-                send_registered(player_id, client_sockfd);
-                break;
-
-            default:
-                printf("Message inconnu reçu de joueur %d\n", player_id);
-                break;
+    while (1) {
+        ssize_t r = sread(read_fd, &msg, sizeof(msg));
+        if (r == 0) break;
+        for (int i = 0; i < player_count; i++) {
+            swrite(sockets[i], &msg, sizeof(msg));
         }
     }
-
-    // Préparer et envoyer le message de fin de partie
-    msg.msgt = GAME_OVER;
-    if (state->scores[player_id] > state->scores[(player_id + 1) % 2]) {
-        msg.game_over.winner = WIN;
-    } else if (state->scores[player_id] < state->scores[(player_id + 1) % 2]) {
-        msg.game_over.winner = LOSE;
-    } else {
-        msg.game_over.winner = DRAW;
-    }
-
-    nwrite(client_sockfd, &msg, sizeof(msg));
-    printf("Joueur %d a reçu le résultat final.\n", player_id);
-
-    sclose(client_sockfd);
-    exit(0);
 }
 
+void run_client_handler(int client_fd, int player_id, struct GameState *state, int sem_id, int pipe_bcast_write_fd) {
+    union Message msg;
+    while (sread(client_fd, &msg, sizeof(msg)) > 0) {
+        if (msg.msgt == MOVEMENT) {
+            sem_down0(sem_id);
+            bool game_over = process_user_command(state,
+                player_id == 1 ? PLAYER1 : PLAYER2,
+                msg.movement.pos.x,  // ⚠️ Remplacer par une vraie direction plus tard
+                pipe_bcast_write_fd);
+            sem_up0(sem_id);
+            if (game_over) break;
+        }
+    }
+    sclose(client_fd);
+    exit(EXIT_SUCCESS);
+}
 
 int main(int argc, char **argv) {
-    union Message msg;
-    Player tabPlayers[MAX_PLAYERS];
-    int nbPlayers = 0;
-
-    sigset_t set;
-    ssigemptyset(&set);
-    sigaddset(&set, SIGINT);
-    sigaddset(&set, SIGTERM);
-    ssigprocmask(SIG_BLOCK, &set, NULL);
-    ssigaction(SIGTERM, endServerHandler);
-    ssigaction(SIGINT, endServerHandler);
-
-    int sockfd = initSocketServer(SERVER_PORT);
-    int opt = 1;
-    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-    printf("Le serveur tourne sur le port : %i \n", SERVER_PORT);
-
-    int shm = sshmget(KEY, sizeof(struct GameState), IPC_CREAT | 0666);
-    struct GameState *state = (struct GameState *)sshmat(shm);
-
-    int sem_id = sem_create(KEY, 1, IPC_CREAT | 0666, 0);
-
-    while (!end || (end && !state->game_over)) {
-        int newsockfd = saccept(sockfd);
-        if (newsockfd >= 0) {
-            if (nbPlayers < MAX_PLAYERS) {
-                pid_t child_pid = sfork();
-                if (child_pid == 0) {
-                    client_handler_func(nbPlayers, newsockfd, state, sem_id);
-                    exit(0);
-                }
-
-                tabPlayers[nbPlayers].player_id = nbPlayers;
-                tabPlayers[nbPlayers].sockfd = newsockfd;
-                tabPlayers[nbPlayers].child_pid = child_pid;
-                nbPlayers++;
-
-                printf("Inscription joueur numéro: %u\n", nbPlayers - 1);
-            } else {
-                printf("Nombre maximum de joueurs atteint, refus de connexion.\n");
-                sclose(newsockfd);
-            }
-        }
-
-        while (waitpid(-1, NULL, WNOHANG) > 0) {}
-
-        usleep(500000);
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <port>\n", argv[0]);
+        exit(EXIT_FAILURE);
     }
 
-    printf("Arrêt du serveur en cours...\n");
+    int port = atoi(argv[1]);
+    ssigaction(SIGINT, handle_sigint);
+    ssigaction(SIGALRM, handle_sigalrm);
 
-    for (int i = 0; i < nbPlayers; i++) {
-        kill(tabPlayers[i].child_pid, SIGTERM);
-        waitpid(tabPlayers[i].child_pid, NULL, 0);
-        sclose(tabPlayers[i].sockfd);
+    int sockfd = initSocketServer(port);
+    printf("Serveur lancé sur le port %d\n", port);
+
+    int shm_id = sshmget(SHM_KEY, sizeof(struct GameState), IPC_CREAT | 0666);
+    struct GameState *state = sshmat(shm_id);
+    int sem_id = sem_create(SEM_KEY, 1, 0666, 1);
+
+    int pipe_bcast[2];
+    spipe(pipe_bcast);
+
+    int client_sockets[MAX_PLAYERS];
+    pid_t child_pids[MAX_PLAYERS];
+    int player_count = 0;
+
+    while (server_running) {
+        if (player_count == 0) {
+            // Attente du premier joueur
+            int client_fd = saccept(sockfd);
+            union Message reg_msg;
+            ssize_t r = sread(client_fd, &reg_msg, sizeof(reg_msg));
+            if (r <= 0 || reg_msg.msgt != REGISTRATION) {
+                sclose(client_fd);
+                continue;
+            }
+
+            send_registered(1, client_fd);
+            client_sockets[0] = client_fd;
+            child_pids[0] = -1;
+            player_count = 1;
+            alarm(30);
+            continue;
+        }
+
+        if (player_count == 1) {
+            if (timeout_occurred) {
+                printf("⏰ Timeout : joueur 2 absent, déconnexion joueur 1.\n");
+                sclose(client_sockets[0]);
+                timeout_occurred = 0;
+                player_count = 0;
+                continue;
+            }
+
+            int client_fd = saccept(sockfd);
+            alarm(0);  // Annule le timer
+
+            union Message reg_msg;
+            ssize_t r = sread(client_fd, &reg_msg, sizeof(reg_msg));
+            if (r <= 0 || reg_msg.msgt != REGISTRATION) {
+                sclose(client_fd);
+                continue;
+            }
+
+            send_registered(2, client_fd);
+            client_sockets[1] = client_fd;
+
+            pid_t pid1 = sfork();
+            if (pid1 == 0) {
+                sclose(sockfd); sclose(pipe_bcast[0]);
+                run_client_handler(client_sockets[0], 1, state, sem_id, pipe_bcast[1]);
+            }
+            child_pids[0] = pid1;
+
+            pid_t pid2 = sfork();
+            if (pid2 == 0) {
+                sclose(sockfd); sclose(pipe_bcast[0]);
+                run_client_handler(client_sockets[1], 2, state, sem_id, pipe_bcast[1]);
+            }
+            child_pids[1] = pid2;
+
+            player_count = 2;
+            break;
+        }
+    }
+
+    if (player_count == 2) {
+        int fdmap = sopen("./resources/map.txt", O_RDONLY, 0);
+        load_map(fdmap, pipe_bcast[1], state);
+        sclose(fdmap);
+
+        pid_t bcast_pid = sfork();
+        if (bcast_pid == 0) {
+            run_broadcaster(pipe_bcast[0], client_sockets[0], client_sockets[1], player_count);
+            exit(EXIT_SUCCESS);
+        }
+
+        for (int i = 0; i < player_count; i++) {
+            swaitpid(child_pids[i], NULL, 0);
+        }
+
+        skill(bcast_pid, SIGTERM);
+        swaitpid(bcast_pid, NULL, 0);
     }
 
     sshmdt(state);
-    sshmdelete(KEY);
-    sem_delete(KEY);
+    sshmdelete(shm_id);
+    sem_delete(sem_id);
     sclose(sockfd);
+    sclose(pipe_bcast[0]);
+    sclose(pipe_bcast[1]);
 
-    terminate(tabPlayers, nbPlayers);
-    exit(0);
+    printf("Serveur terminé proprement.\n");
+    return 0;
 }
-
-
-void run_broadcaster(void *argv)
-{
-   // PROCESSUS FILS
-   int *pipefd = argv;
-   char line[BUFFERSIZE + 1];
-
-   // Cloture du descripteur d'écriture
-   sclose(pipefd[1]);
-
-   // Boucle de lecture sur le pipe
-   // et écriture 
-   int nbChar;
-   while ((nbChar = sread(pipefd[0], line, BUFFERSIZE)) != 0) {
-      swrite(1, line, nbChar);
-   }
-
-   // Cloture du descripteur de lecture
-   sclose(pipefd[0]);
-}
-int initSocketServer(int serverPort)
-{
-  int sockfd = ssocket();
-  int opt = 1;
-  setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-  sbind(serverPort, sockfd);
-
-  slisten(sockfd, BACKLOG);
-
-  return sockfd;
-}
-
-
-
