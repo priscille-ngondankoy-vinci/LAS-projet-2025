@@ -137,6 +137,8 @@ int main(int argc, char **argv) {
             send_registered(2, client_fd);
             client_sockets[1] = client_fd;
 
+            printf("✅ Joueur %d connecté avec succès.\n", player_count + 1);
+
             pid_t pid1 = sfork();
             if (pid1 == 0) {
                 sclose(sockfd); sclose(pipe_bcast[0]);

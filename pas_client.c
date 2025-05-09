@@ -7,12 +7,7 @@
 #include "utils_v3.h"
 #include "pascman.h"
 
-// Fonction pour lancer l'interface graphique pas-cman-ipl
-void launch_graphical_interface(int pipe_read_end) {
-    // Redirige l'entrée standard vers le pipe (lecture depuis pas_client)
-    sdup2(pipe_read_end, STDIN_FILENO);
-
-    // Lancement de pas-cman-ipl (il lira depuis stdin, et écrira les directions sur stdout)
+void launch_graphical_interface() {
     sexecl("./target/release/pas-cman-ipl", "pas-cman-ipl", NULL);
 }
 
@@ -25,22 +20,10 @@ int main(int argc, char *argv[]) {
     char *server_ip = argv[1];
     int server_port = atoi(argv[2]);
 
-    // 1. Connexion au serveur via socket
     int sockfd = ssocket();
     sconnect(server_ip, server_port, sockfd);
 
-    // 2. Attente de la confirmation d'inscription
-    union Message msg;
-    sread(sockfd, &msg, sizeof(msg));
-    if (msg.msgt != REGISTRATION) {
-        fprintf(stderr, "Erreur : échec de l'inscription au serveur.\n");
-        sclose(sockfd);
-        exit(EXIT_FAILURE);
-    }
-
-    // 3. Création d’un seul pipe :
-    //    - lecture côté pas_client
-    //    - écriture côté pas-cman-ipl
+    // Création du pipe : direction clavier sera écrite ici par pas-cman-ipl
     int pipefd[2];
     spipe(pipefd);
 
@@ -48,52 +31,84 @@ int main(int argc, char *argv[]) {
     if (pid == 0) {
         // Enfant : lance pas-cman-ipl
 
-        sclose(pipefd[0]); // On ne lit pas ici
+        // Rediriger STDIN vers sockfd (messages serveur)
+        sdup2(sockfd, STDIN_FILENO);
 
-        // Redirections : stdout vers pipe (pour envoyer les directions)
+        // Rediriger STDOUT vers pipefd[1] (direction vers client)
         sdup2(pipefd[1], STDOUT_FILENO);
 
-        // stdin sera redirigé par la fonction launch_graphical_interface()
-        launch_graphical_interface(pipefd[0]);
+        // Nettoyage
+        sclose(pipefd[0]);
+        sclose(pipefd[1]);
+        sclose(sockfd);
 
-        // Ne devrait jamais arriver ici
+        // Lancement
+        launch_graphical_interface();
+        exit(EXIT_FAILURE);  // sécurité
+    }
+
+    // Parent : pas_client
+    sclose(pipefd[1]); // lecture uniquement
+
+    // Inscription
+    union Message msg;
+    ssize_t r = sread(sockfd, &msg, sizeof(msg));
+    if (r != sizeof(msg) || msg.msgt != REGISTRATION) {
+        fprintf(stderr, "Erreur : échec de l'inscription.\n");
+        sclose(sockfd);
         exit(EXIT_FAILURE);
     }
 
-    // Parent (pas_client)
-    sclose(pipefd[1]); // Pas besoin d'écriture dans le pipe ici
+    printf("✅ Connecté avec succès en tant que joueur %u !\n", msg.registration.player);
 
+
+// 2. Boucle attente : on attend que le serveur envoie SPAWN (début du jeu)
+bool start_game = false;
+while (!start_game) {
+    union Message init_msg;
+    if (read(sockfd, &init_msg, sizeof(init_msg)) <= 0) break;
+
+    if (init_msg.msgt == SPAWN) {
+        start_game = true;
+
+        // Fork et lancement de l’interface ici
+        pid_t pid = sfork();
+        if (pid == 0) {
+            sdup2(sockfd, STDIN_FILENO);
+            sdup2(pipefd[1], STDOUT_FILENO);
+            sclose(pipefd[0]); sclose(pipefd[1]); sclose(sockfd);
+            launch_graphical_interface();
+        } else {
+            sclose(pipefd[1]);
+            nwrite(STDOUT_FILENO, &init_msg, sizeof(init_msg)); // envoie le premier SPAWN à l’interface
+        }
+    }
+}
+
+    // Boucle principale
     bool game_over = false;
-
     while (!game_over) {
-        // 1. Lecture d'une direction depuis pas-cman-ipl (écrite sur stdout → pipefd[0])
+        // Lire direction depuis pas-cman-ipl
         enum Direction dir;
         ssize_t dr = read(pipefd[0], &dir, sizeof(dir));
         if (dr == sizeof(dir)) {
-            // Transmet la direction au serveur via socket
             swrite(sockfd, &dir, sizeof(dir));
         }
 
-        // 2. Lecture des messages du serveur
+        // Lire message serveur
         union Message msg_in;
         ssize_t sr = read(sockfd, &msg_in, sizeof(msg_in));
         if (sr == sizeof(msg_in)) {
-            // Envoie ce message à pas-cman-ipl (lu sur stdin)
-            nwrite(STDOUT_FILENO, &msg_in, sizeof(msg_in));
-
-            // Vérifie si la partie est terminée
+            nwrite(STDOUT_FILENO, &msg_in, sizeof(msg_in));  // transmis à pas-cman-ipl
             if (msg_in.msgt == GAME_OVER) {
                 game_over = true;
             }
         }
 
-        // Pause optionnelle pour éviter une boucle trop rapide
         usleep(5000);
     }
 
-    // Nettoyage
     sclose(pipefd[0]);
     sclose(sockfd);
-
     return EXIT_SUCCESS;
 }
