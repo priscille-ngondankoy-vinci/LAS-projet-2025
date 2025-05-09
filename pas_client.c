@@ -99,35 +99,22 @@ int main(int argc, char **argv){
     ssize_t ret = sread(pipe[0], &dir, sizeof(dir));
     if (ret <= 0) break;
 
+    // Construction correcte du message
+    msg.msgt = MOVEMENT;
     msg.movement.msgt = MOVEMENT;
     msg.movement.id = player_id;
 
-    // Traduction de la direction en mouvement
-    switch (dir) {
-        case LEFT:
-            msg.movement.pos.x = -1;
-            msg.movement.pos.y = 0;
-            break;
-        case RIGHT:
-            msg.movement.pos.x = 1;
-            msg.movement.pos.y = 0;
-            break;
-        case UP:
-            msg.movement.pos.x = 0;
-            msg.movement.pos.y = -1;
-            break;
-        case DOWN:
-            msg.movement.pos.x = 0;
-            msg.movement.pos.y = 1;
-            break;
-        default:
-            continue; // Ne rien envoyer si direction inconnue
-    }
+    // La position n’est pas une position relative ici : on envoie uniquement la direction
+    // Elle sera interprétée côté serveur
+    msg.movement.pos.x = dir; // ⚠️ Utilisé juste comme transport du code direction
+    msg.movement.pos.y = 0;
 
     swrite(sockfd, &msg, sizeof(msg));
 }
 
-    disable_raw_mode();
+
+
+  disable_raw_mode();
 
 
   sclose(sockfd);
@@ -135,3 +122,4 @@ int main(int argc, char **argv){
 
   return 0;
 }
+
