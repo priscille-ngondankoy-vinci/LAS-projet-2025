@@ -36,6 +36,10 @@ void handle_sigalrm(int sig) {
 
 int initSocketServer(int serverPort) {
   int sockfd = ssocket();
+
+  int option = 1;
+  setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option));
+
   sbind(serverPort, sockfd);
   slisten(sockfd, BACKLOG);
   return sockfd;
@@ -62,14 +66,14 @@ void run_client_handler(int client_fd, int player_id, struct GameState *state, i
             sem_down0(sem_id);
             bool game_over = process_user_command(state,
                 player_id == 1 ? PLAYER1 : PLAYER2,
-                (enum Direction) msg.movement.pos.x,// Remplacer par une vraie direction plus tard
+                (enum Direction) msg.movement.pos.x,
                 pipe_bcast_write_fd);
             sem_up0(sem_id);
             if (game_over) break;
         }
     }
     sclose(client_fd);
-    exit(EXIT_SUCCESS);
+    exit(0);
 }
 
 int main(int argc, char **argv) {
@@ -112,13 +116,13 @@ int main(int argc, char **argv) {
             child_pids[0] = -1;
             player_count = 1;
             alarm(30);
-            printf(" Joueur %d connecté avec succès.\n", player_count );
+            printf(" Joueur %d connecté.\n", player_count );
             continue;
         }
 
         if (player_count == 1) {
             if (timeout_occurred) {
-                printf("⏰ Timeout : joueur 2 absent, déconnexion joueur 1.\n");
+                printf("Timeout : joueur 2 absent, déconnexion du joueur 1.\n");
                 sclose(client_sockets[0]);
                 timeout_occurred = 0;
                 player_count = 0;
@@ -167,7 +171,7 @@ int main(int argc, char **argv) {
         pid_t bcast_pid = sfork();
         if (bcast_pid == 0) {
             run_broadcaster(pipe_bcast[0], client_sockets[0], client_sockets[1], player_count);
-            exit(EXIT_SUCCESS);
+            exit(0);
         }
 
         for (int i = 0; i < player_count; i++) {
