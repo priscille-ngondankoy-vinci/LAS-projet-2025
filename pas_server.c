@@ -1,8 +1,25 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <signal.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/sem.h>
+#include <errno.h>
+
 #include "utils_v3.h"
 #include "pascman.h"
 #include "game.h"
 
 #define MAX_PLAYERS 2
+#define BACKLOG 5
 #define SHM_KEY 1234
 #define SEM_KEY 5678
 
@@ -17,14 +34,13 @@ void handle_sigalrm(int sig) {
     timeout_occurred = 1;
 }
 
-int initSocketServer(int port) {
-    int sockfd = ssocket();
-    sbind(port, sockfd);
-    slisten(sockfd, 5);
-    int option = 1;
-    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option));
-    return sockfd;
+int initSocketServer(int serverPort) {
+  int sockfd = ssocket();
+  sbind(serverPort, sockfd);
+  slisten(sockfd, BACKLOG);
+  return sockfd;
 }
+
 
 void run_broadcaster(int read_fd, int socket1, int socket2, int player_count) {
     union Message msg;
