@@ -31,9 +31,7 @@ void run_pas_cman_ipl(void *arg_sockfd, void *arg_pipe_write) {
   int sockfd = *(int *)arg_sockfd;
   int pipe_write = *(int *)arg_pipe_write;
 
-  // Rediriger stdin vers la socket (pour que pas-cman-ipl lise les messages depuis le serveur)
   sdup2(sockfd, 0);         
-  // Rediriger stdout vers le pipe (pour que pas-cman-ipl écrive ses messages dans le pipe)
   sdup2(pipe_write, 1);  
 
   close(sockfd);
@@ -48,7 +46,6 @@ int main(int argc, char **argv){
   union Message msg;
   int sockfd = initSocketClient(SERVER_IP, SERVER_PORT);
 
-  // Création du pipe : écriture par pas-cman-ipl (stdout), lecture par pas-client
   int pipe[2];
   spipe(pipe);
 
@@ -59,7 +56,6 @@ int main(int argc, char **argv){
 
   close(pipe[1]); 
 
-  /* retrieve player name */
   printf("Bienvenue dans le programme d'inscription au serveur de jeu\n");
   printf("Entrez votre pseudo :\n");
   int ret = sread(0, pseudo, MAX_PSEUDO);
@@ -69,26 +65,22 @@ int main(int argc, char **argv){
   }
   pseudo[ret - 1] = '\0';
 
-  // Envoi du message d'enregistrement au serveur
   msg.registration.msgt = REGISTRATION;
   swrite(sockfd, &msg, sizeof(msg));
   sread(sockfd, &msg, sizeof(msg));
   player_id = msg.registration.player;
-  // Affichage du numéro de joueur
 
  while (1) {
     enum Direction dir;
     ssize_t ret = sread(pipe[0], &dir, sizeof(dir));
     if (ret <= 0) break;
 
-    // Construction correcte du message
     msg.msgt = MOVEMENT;
     msg.movement.msgt = MOVEMENT;
     msg.movement.id = player_id;
 
-    // La position n’est pas une position relative ici : on envoie uniquement la direction
-    // Elle sera interprétée côté serveur
-    msg.movement.pos.x = dir; // Utilisé juste comme transport du code direction
+
+    msg.movement.pos.x = dir;
     msg.movement.pos.y = 0;
 
     swrite(sockfd, &msg, sizeof(msg));

@@ -102,7 +102,6 @@ int main(int argc, char **argv) {
 
     while (server_running) {
         if (player_count == 0) {
-            // Attente du premier joueur
             int client_fd = saccept(sockfd);
             union Message reg_msg;
             ssize_t r = sread(client_fd, &reg_msg, sizeof(reg_msg));
@@ -130,7 +129,7 @@ int main(int argc, char **argv) {
             }
 
             int client_fd = saccept(sockfd);
-            alarm(0);  // Annule le timer
+            alarm(0);
 
             union Message reg_msg;
             ssize_t r = sread(client_fd, &reg_msg, sizeof(reg_msg));
